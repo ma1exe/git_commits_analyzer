@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статистика продуктивности разработчиков Git</title>
+    <link rel="stylesheet" href="static/style.css">
+    <!-- Chart.js для визуализации данных -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.1/dist/chart.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Статистика продуктивности разработчиков Git</h1>
+        
+        <!-- Информация о загруженных данных -->
+        <div id="data-info">
+            <label for="data-url">Файл данных JSON:</label>
+            <input type="text" id="data-url" class="input-field" value="developer_stats.json" />
+            <button onclick="loadData(document.getElementById('data-url').value)">Загрузить</button>
+        </div>
+        
+        <!-- Контейнер для сообщений об ошибках -->
+        <div id="error-container" style="display: none;">
+            <div class="error-message" id="error-message"></div>
+        </div>
+        
+        <!-- Метаданные -->
+        <div id="metadata" class="section"></div>
+        
+        <!-- Общая статистика команды -->
+        <div id="team-stats" class="section"></div>
+        
+        <!-- Графики -->
+        <div class="chart-section">
+            <h2>Визуализация данных</h2>
+            
+            <div class="chart-container">
+                <h3>Коммиты разработчиков</h3>
+                <div id="commit-chart"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3>Влияние и вклад</h3>
+                <div id="impact-chart"></div>
+            </div>
+            
+            <div class="chart-container">
+                <h3>Активность по времени</h3>
+                <div id="timeline-chart"></div>
+            </div>
+        </div>
+        
+        <!-- Рейтинг полезности разработчиков -->
+        <div id="usefulness-rating" class="section"></div>
+        
+        <!-- Детальная статистика по разработчикам -->
+        <div id="developer-stats" class="section"></div>
+        
+        <div class="footer">
+            <p>Сгенерировано анализатором продуктивности Git.</p>
+        </div>
+    </div>
+    
+    <script src="static/script.js"></script>
+    
+    <script>
+        // Функция для загрузки данных JSON
+        function loadData(jsonUrl) {
+            fetch(jsonUrl)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("Данные успешно загружены:", data);
+                    // Скрываем сообщение об ошибке, если оно было показано
+                    document.getElementById('error-container').style.display = 'none';
+                    
+                    // Обработка и отображение данных происходит в script.js
+                })
+                .catch(error => {
+                    console.error("Ошибка при загрузке данных:", error);
+                    document.getElementById('error-message').textContent = 
+                        `Не удалось загрузить данные: ${error.message}`;
+                    document.getElementById('error-container').style.display = 'block';
+                });
+        }
+        
+        // Автоматически загружаем данные при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            const dataUrl = document.getElementById('data-url').value;
+            if (dataUrl) {
+                loadData(dataUrl);
+            }
+        });
+    </script>
+</body>
+</html>

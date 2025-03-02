@@ -1,0 +1,854 @@
+diff --git a/git_collector.py b/git_collector.py
+index 17ada98..a673ec5 100644
+--- a/git_collector.py
++++ b/git_collector.py
+@@ -63,15 +63,21 @@ class GitDataCollector:
+                 if len(parts) < 5:
+                     print(f"Предупреждение: пропуск строки с неполными данными: {line}")
+                     continue
+-                    
++                
+                 commit_hash, author_name, author_email, timestamp, subject = parts
+-                
+-                # Проверяем, является ли коммит revert-коммитом
++                    
++                # Проверяем, является ли коммит revert-коммитом или merge-коммитом
+                 is_revert = subject.startswith('Revert "') or 'revert' in subject.lower()
++                is_merge = subject.startswith('Merge ') or subject.startswith('Merge: ') or 'merge' in subject.lower()
+                 
+                 # Пропускаем revert-коммиты, если настроено их игнорирование
+                 if is_revert and config.IGNORE_REVERTS:
+                     continue
++
++                # Пропускаем merge-коммиты, если настроено их игнорирование
++                if is_merge and config.IGNORE_MERGES:
++                    continue
+                     
+                 commits.append({
+                     'hash': commit_hash,
+                     'timestamp': int(timestamp),
+                     'date': datetime.fromtimestamp(int(timestamp)).strftime('%Y-%m-%d %H:%M:%S'),
+                     'subject': subject,
+-                    'is_revert': is_revert
++                    'is_revert': is_revert,
++                    'is_merge': is_merge
+                 })
+
+diff --git a/analyzer.py b/analyzer.py
+index e6ca2ec..1cf89d4 100644
+--- a/analyzer.py
++++ b/analyzer.py
+@@ -28,6 +28,7 @@ class DevActivityAnalyzer:
+             'commit_subjects': [],
+             'average_commit_size': 0,
+             'reverts_count': 0,
++            'merge_count': 0,  # Количество merge-коммитов
+             'most_modified_files': defaultdict(int),
+             'squash_count': 0,  # Примерное количество squash-коммитов
+         })
+@@ -212,6 +213,10 @@ class DevActivityAnalyzer:
+         # Если это revert-коммит, увеличиваем счетчик
+         if commit['is_revert']:
+             dev_stats['reverts_count'] += 1
++            
++        # Если это merge-коммит, увеличиваем счетчик
++        if commit.get('is_merge', False):
++            dev_stats['merge_count'] += 1
+         
+         # Обновляем темы коммитов
+         dev_stats['commit_subjects'].append(commit['subject'])
+
+diff --git a/config.py b/config.py
+index 33a36b2..a23de1c 100644
+--- a/config.py
++++ b/config.py
+@@ -5,6 +5,7 @@ END_DATE = None
+ 
+ # Настройки анализа
+ IGNORE_REVERTS = False
++IGNORE_MERGES = False
+ MIN_CODE_CHANGE_SIZE = 5  # Минимальное количество изменений для существенного коммита
+ IGNORE_WHITESPACE_ONLY = True
+ CONSIDER_FILE_COMPLEXITY = True
+
+diff --git a/main.py b/main.py
+index 5c74487..5eb5a9e 100644
+--- a/main.py
++++ b/main.py
+@@ -8,6 +8,7 @@ def main():
+     parser = argparse.ArgumentParser(description='Анализ Git-репозитория для оценки продуктивности разработчиков.')
+     parser.add_argument('--repo-path', required=True, help='Путь к Git-репозиторию для анализа')
+     parser.add_argument('--output-file', default='developer_stats.json', help='Путь к выходному JSON-файлу')
++    parser.add_argument('--ignore-merges', action='store_true', help='Игнорировать merge-коммиты')
+     parser.add_argument('--ignore-reverts', action='store_true', help='Игнорировать revert-коммиты')
+     parser.add_argument('--start-date', help='Начальная дата для анализа (YYYY-MM-DD)')
+     parser.add_argument('--end-date', help='Конечная дата для анализа (YYYY-MM-DD)')
+@@ -25,6 +26,7 @@ def main():
+     parser.add_argument('--weight-substantive-ratio', type=float, default=0.2, 
+                         help='Вес для соотношения существенных коммитов (по умолчанию: 0.2)')
+     parser.add_argument('--weight-revert-penalty', type=float, default=-0.1, 
++                       help='Вес для штрафа за revert-коммиты (по умолчанию: -0.1)')
++    parser.add_argument('--weight-merge-penalty', type=float, default=-0.05, 
+                         help='Вес для штрафа за merge-коммиты (по умолчанию: -0.05)')
+     parser.add_argument('--weight-daily-activity', type=float, default=0.2, 
+                         help='Вес для ежедневной активности (по умолчанию: 0.2)')
+@@ -34,6 +36,7 @@ def main():
+     
+     # Настраиваем конфигурацию
+     config.IGNORE_REVERTS = args.ignore_reverts
++    config.IGNORE_MERGES = args.ignore_merges
+     config.REPO_PATH = args.repo_path
+     config.OUTPUT_FILE = args.output_file
+     config.START_DATE = args.start_date
+@@ -60,6 +63,8 @@ def main():
+         custom_weights['substantive_ratio'] = args.weight_substantive_ratio
+     if args.weight_revert_penalty != -0.1:
+         custom_weights['revert_penalty'] = args.weight_revert_penalty
++    if args.weight_merge_penalty != -0.05:
++        custom_weights['merge_penalty'] = args.weight_merge_penalty
+     if args.weight_daily_activity != 0.2:
+         custom_weights['daily_activity'] = args.weight_daily_activity
+ 
+@@ -81,12 +86,17 @@ def main():
+     # Генерируем HTML-отчет, если это запрошено
+     if args.generate_html:
+         # Определяем имя HTML-файла на основе имени JSON-файла
+-        base_name = os.path.basename(args.output_file)
+-        name_without_ext = os.path.splitext(base_name)[0]
++        base_name = os.path.basename(args.output_file)
++        name_without_ext = os.path.splitext(base_name)[0]
+         html_filename = name_without_ext + ".html"
+         
++        # Используем директорию JSON-файла, если не указано иное
++        html_output_dir = args.html_output_dir
++        if html_output_dir == 'git_stats_report':  # Если используется значение по умолчанию
++            html_output_dir = os.path.dirname(os.path.abspath(args.output_file))
++        
+         from html_generator import HTMLGenerator
+         
+         html_gen = HTMLGenerator(
+             args.output_file, 
+-            args.html_output_dir,
++            html_output_dir,
+             html_filename=html_filename
+         )
+         html_gen.generate()
+
+diff --git a/output_generator.py b/output_generator.py
+index a9a12c1..b3f1c8a 100644
+--- a/output_generator.py
++++ b/output_generator.py
+@@ -107,6 +107,11 @@ class JSONOutputGenerator:
+             'daily_activity': {
+                 'weight': 0.2,
+                 'description': 'Регулярность и стабильность активности. Учитывает равномерность вклада во времени.'
++            },
++            'merge_penalty': {
++                'weight': -0.05,
++                'description': 'Штраф за merge-коммиты. Отражает работу по интеграции чужого кода.'
+             }
+         }
+         
+@@ -132,6 +137,9 @@ class JSONOutputGenerator:
+             # Нормализуем количество revert-коммитов (отрицательный фактор)
+             revert_penalty = stats['reverts_count'] / stats['total_commits'] if stats['total_commits'] > 0 else 0
+             
++            # Нормализуем количество merge-коммитов (отрицательный фактор)
++            merge_penalty = stats.get('merge_count', 0) / stats['total_commits'] if stats['total_commits'] > 0 else 0
++            
+             # Нормализуем активность по времени (коммиты в день)
+             active_days = stats.get('active_days', 1)
+             daily_activity = (stats['total_commits'] / active_days) / (max_active_days / active_days) if active_days > 0 else 0
+@@ -144,6 +152,10 @@ class JSONOutputGenerator:
+                 revert_penalty * weight_values['revert_penalty'] +
+                 daily_activity * weight_values['daily_activity']
+             )
++            
++            # Добавляем штраф за merge-коммиты, если указан
++            if 'merge_penalty' in weight_values:
++                usefulness_score += merge_penalty * weight_values['merge_penalty']
+ 
+             print(f"  - Итоговый рейтинг перед нормализацией: {usefulness_score}")
+             
+@@ -158,7 +170,8 @@ class JSONOutputGenerator:
+                     'commit_impact': round(impact_norm * 100, 2),
+                     'substantive_ratio': round(substantive_ratio * 100, 2),
+                     'revert_penalty': round(revert_penalty * 100, 2),
+-                    'daily_activity': round(daily_activity * 100, 2)
++                    'daily_activity': round(daily_activity * 100, 2),
++                    'merge_penalty': round(merge_penalty * 100, 2)
+                 },
+                 'factor_descriptions': {
+                     param: info['description'] for param, info in weights.items()
+                 }
+
+diff --git a/html_generator.py b/html_generator.py
+index d64d6d4..5cc8ea7 100644
+--- a/html_generator.py
++++ b/html_generator.py
+@@ -4,22 +4,28 @@ import json
+ import shutil
+ from datetime import datetime
+ 
++class DatePicker:
++    """Простой виджет выбора даты"""
++    # ... код для DatePicker ...
++
+ class HTMLGenerator:
+     """
+     Генератор HTML-отчетов по статистике разработчиков Git без использования веб-сервера.
+     """
+     
+-    def __init__(self, json_file, output_dir="git_stats_report", html_filename=None):
++    def __init__(self, json_file, output_dir=None, html_filename=None):
+         """
+         Инициализация генератора HTML.
+         
+         :param json_file: Путь к JSON-файлу с результатами анализа
+-        :param output_dir: Директория для сохранения HTML-отчета
++        :param output_dir: Директория для сохранения HTML-отчета (если None, используется директория JSON-файла)
+         :param html_filename: Имя HTML-файла (если None, то используется имя JSON-файла с расширением .html)
+         """
+         self.json_file = json_file
+-        self.output_dir = output_dir
++        # Определяем директорию для вывода
++        if output_dir is None:
++            # Используем директорию JSON-файла
++            self.output_dir = os.path.dirname(os.path.abspath(json_file))
++        else:
++            self.output_dir = output_dir
+         
+         # Определяем имя выходного HTML-файла
+         if html_filename:
+@@ -31,7 +37,7 @@ class HTMLGenerator:
+             self.html_filename = name_without_ext + ".html"
+             
+         self.data = None
+-        print(f"HTML-генератор инициализирован. JSON-файл: {json_file}, HTML-файл: {self.html_filename}")
++        print(f"HTML-генератор инициализирован. JSON-файл: {json_file}, HTML-файл: {os.path.join(self.output_dir, self.html_filename)}")
+         
+     def generate(self):
+         """
+@@ -222,7 +228,7 @@ class HTMLGenerator:
+             raise Exception("Данные не загружены")
+             
+         # Путь к HTML-файлу
+-        html_file = os.path.join(self.output_dir, "index.html")
++        html_file = os.path.join(self.output_dir, self.html_filename)
+         print(f"Генерация HTML-файла: {html_file}")
+ 
+         # ... остальной код ...
+
+diff --git a/static/standalone_script.js b/static/standalone_script.js
+--- a/static/standalone_script.js
++++ b/static/standalone_script.js
+@@ -2,13 +2,74 @@
+ document.addEventListener('DOMContentLoaded', function() {
+     console.log('Git Developer Statistics Visualization loaded');
+     
+-    // Загружаем данные из встроенного JSON
+-    const data = window.gitAnalysisData;
+-    if (data) {
+-        displayData(data);
+-    } else {
+-        console.error('Data not found!');
+-        document.getElementById('error-message').textContent = 'Ошибка: Данные не найдены!';
+-        document.getElementById('error-container').style.display = 'block';
++    // Загружаем данные из встроенного JSON
++    const data = window.gitAnalysisData;
++    if (data) {
++        // Установка скрытых разработчиков из метаданных
++        window.hiddenDevelopers = new Set(data.metadata.excluded_developers || []);
++        
++        // Добавляем панель управления видимостью разработчиков
++        addDeveloperVisibilityControls(data);
++        
++        // Отображаем данные
++        displayData(data);
++    } else {
++        console.error('Data not found!');
++        document.getElementById('error-message').textContent = 'Ошибка: Данные не найдены!';
++        document.getElementById('error-container').style.display = 'block';
++    }
++    
++    // Функция для отображения данных
++    function displayData(data) {
++        // Установка скрытых разработчиков из метаданных
++        window.hiddenDevelopers = new Set(data.metadata.excluded_developers || []);
++        
++        // Добавление информации о весах параметров в начало страницы
++        displayWeightsInfo(data);
++        
++        // Отображаем метаданные
++        displayMetadata(data.metadata);
++        
++        // Отображаем статистику команды
++        displayTeamStats(data.team_stats);
++        
++        // Отображаем рейтинг полезности
++        displayUsefulnessRating(data.usefulness_rating, data.developers);
++        
++        // Отображаем статистику разработчиков
++        displayDeveloperStats(data.developers);
++        
++        // Создаем графики
++        createCommitChart(data);
++        createImpactChart(data);
++        createContributionTimeline(data);
++    }
++    
++    // Функция для добавления информации о весах параметров
++    function displayWeightsInfo(data) {
++        const weightInfoDiv = document.createElement('div');
++        weightInfoDiv.className = 'weight-info';
++        weightInfoDiv.style.margin = '20px 0';
++        weightInfoDiv.style.padding = '15px';
++        weightInfoDiv.style.background = '#f8f9fa';
++        weightInfoDiv.style.borderRadius = '8px';
++        weightInfoDiv.style.border = '1px solid #e1e4e8';
++        
++        const weightTitle = document.createElement('h2');
++        weightTitle.textContent = 'Параметры оценки полезности разработчиков';
++        weightTitle.style.marginTop = '0';
++        weightInfoDiv.appendChild(weightTitle);
++        
++        const weightText = document.createElement('p');
++        weightText.textContent = 'Рейтинг полезности рассчитывается на основе следующих параметров с указанными весами:';
++        weightInfoDiv.appendChild(weightText);
++        
++        // Получаем используемые веса
++        const weights = data.weights_used || {
++            substantial_commits: 0.3,
++            lines: 0.15,
++            impact: 0.25,
++            substantive_ratio: 0.2,
++            revert_penalty: -0.1,
++            daily_activity: 0.2,
++            merge_penalty: -0.05
++        };
+diff --git a/gui.py b/gui.py
+index 9a2df33..a9fc2bd 100644
+--- a/gui.py
++++ b/gui.py
+@@ -4,6 +4,102 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
+ import threading
+ import subprocess
+ import datetime
++import calendar
++import os
++
++class DatePicker:
++    """Простой виджет выбора даты"""
++    def __init__(self, parent, callback, initial_date=None):
++        self.parent = parent
++        self.callback = callback
++        self.window = tk.Toplevel(parent)
++        self.window.title("Выберите дату")
++        self.window.transient(parent)
++        self.window.grab_set()
++        
++        # Установка текущей даты или начальной даты
++        if initial_date:
++            try:
++                self.current_date = datetime.datetime.strptime(initial_date, "%Y-%m-%d").date()
++            except ValueError:
++                self.current_date = datetime.date.today()
++        else:
++            self.current_date = datetime.date.today()
++        
++        self.year = self.current_date.year
++        self.month = self.current_date.month
++        
++        # Создаем виджеты
++        self.setup_ui()
++        
++        # Центрируем окно
++        self.window.update_idletasks()
++        width = self.window.winfo_width()
++        height = self.window.winfo_height()
++        x = (self.window.winfo_screenwidth() // 2) - (width // 2)
++        y = (self.window.winfo_screenheight() // 2) - (height // 2)
++        self.window.geometry('{}x{}+{}+{}'.format(width, height, x, y))
++        
++    def setup_ui(self):
++        """Настраивает пользовательский интерфейс"""
++        # Верхняя панель с навигацией
++        nav_frame = ttk.Frame(self.window)
++        nav_frame.pack(fill=tk.X, padx=5, pady=5)
++        
++        prev_year = ttk.Button(nav_frame, text="<<", width=3, command=self.prev_year)
++        prev_year.pack(side=tk.LEFT)
++        
++        prev_month = ttk.Button(nav_frame, text="<", width=3, command=self.prev_month)
++        prev_month.pack(side=tk.LEFT, padx=5)
++        
++        self.month_year_label = ttk.Label(nav_frame, text=self.get_month_year_str())
++        self.month_year_label.pack(side=tk.LEFT, padx=5)
++        
++        next_month = ttk.Button(nav_frame, text=">", width=3, command=self.next_month)
++        next_month.pack(side=tk.LEFT, padx=5)
++        
++        next_year = ttk.Button(nav_frame, text=">>", width=3, command=self.next_year)
++        next_year.pack(side=tk.LEFT)
++        
++        # Календарь
++        calendar_frame = ttk.Frame(self.window)
++        calendar_frame.pack(padx=5, pady=5)
++        
++        # Дни недели
++        days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
++        for i, day in enumerate(days):
++            ttk.Label(calendar_frame, text=day, width=4).grid(row=0, column=i)
++        
++        # Заполняем календарь днями
++        self.day_buttons = []
++        for i in range(6):  # 6 строк
++            for j in range(7):  # 7 дней в неделе
++                btn = ttk.Button(calendar_frame, text="", width=4, command=lambda x=i, y=j: self.select_day(x, y))
++                btn.grid(row=i+1, column=j)
++                self.day_buttons.append(btn)
++        
++        self.update_calendar()
++        
++        # Кнопки внизу
++        button_frame = ttk.Frame(self.window)
++        button_frame.pack(fill=tk.X, padx=5, pady=5)
++        
++        today_button = ttk.Button(button_frame, text="Сегодня", command=self.set_today)
++        today_button.pack(side=tk.LEFT, padx=5)
++        
++        clear_button = ttk.Button(button_frame, text="Очистить", command=self.clear_date)
++        clear_button.pack(side=tk.LEFT, padx=5)
++        
++        cancel_button = ttk.Button(button_frame, text="Отмена", command=self.window.destroy)
++        cancel_button.pack(side=tk.RIGHT, padx=5)
++
++    def get_month_year_str(self):
++        """Возвращает строку месяц и год"""
++        months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
++                  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
++        return f"{months[self.month-1]} {self.year}"
++    
++    def update_calendar(self):
++        """Обновляет отображение календаря"""
++        # ... остальной код DatePicker ...
+ 
+ class RedirectText:
+     """Класс для перенаправления stdout в текстовый виджет"""
+@@ -25,22 +118,22 @@ class GitDevProductivityGUI:
+         self.root = root
+         self.root.title("Git Developer Productivity Analyzer")
+         self.root.geometry("900x750")
+-        
++
+         # Устанавливаем минимальный размер окна
+         self.root.minsize(800, 600)
+-        
++
+         # Создаем основной фрейм с отступами
+         main_frame = ttk.Frame(root, padding="10")
+         main_frame.pack(fill=tk.BOTH, expand=True)
+-        
++
+         # Создаем notebook (вкладки)
+         self.notebook = ttk.Notebook(main_frame)
+         self.notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+-        
+-        # Создаем вкладки
++
++        # Инициализируем состояние приложения
++        self.initialize_state()
++
++        # Создаем вкладки
+         self.setup_analysis_tab()
+         self.setup_weights_tab()
+         self.setup_exclude_tab()
+@@ -128,26 +221,41 @@ class GitDevProductivityGUI:
+         ttk.Label(dates_frame, text="Период анализа:").pack(side=tk.LEFT, padx=(0, 10))
+         
+         ttk.Label(dates_frame, text="С:").pack(side=tk.LEFT, padx=(0, 5))
+         self.start_date_var = tk.StringVar()
+-        start_date_entry = ttk.Entry(dates_frame, textvariable=self.start_date_var, width=10)
+-        start_date_entry.pack(side=tk.LEFT, padx=(0, 10))
++        self.start_date_entry = ttk.Entry(dates_frame, textvariable=self.start_date_var, width=10)
++        self.start_date_entry.pack(side=tk.LEFT, padx=(0, 5))
++        
++        start_date_picker = ttk.Button(dates_frame, text="📅", width=3, 
++                                     command=lambda: self.show_date_picker(self.start_date_var))
++        start_date_picker.pack(side=tk.LEFT, padx=(0, 10))
+         
+         ttk.Label(dates_frame, text="По:").pack(side=tk.LEFT, padx=(0, 5))
+         self.end_date_var = tk.StringVar()
+-        end_date_entry = ttk.Entry(dates_frame, textvariable=self.end_date_var, width=10)
+-        end_date_entry.pack(side=tk.LEFT)
++        self.end_date_entry = ttk.Entry(dates_frame, textvariable=self.end_date_var, width=10)
++        self.end_date_entry.pack(side=tk.LEFT, padx=(0, 5))
++        
++        end_date_picker = ttk.Button(dates_frame, text="📅", width=3, 
++                                   command=lambda: self.show_date_picker(self.end_date_var))
++        end_date_picker.pack(side=tk.LEFT, padx=(0, 5))
+         
+         ttk.Label(dates_frame, text="(формат: YYYY-MM-DD)").pack(side=tk.LEFT, padx=5)
+ 
+         # Чекбоксы для опций
+         checkboxes_frame = ttk.Frame(options_frame)
+         checkboxes_frame.pack(fill=tk.X, pady=5)
+-        
++
+         self.ignore_reverts_var = tk.BooleanVar(value=True)
+         ignore_reverts_check = ttk.Checkbutton(checkboxes_frame, text="Игнорировать revert-коммиты", variable=self.ignore_reverts_var)
+         ignore_reverts_check.pack(side=tk.LEFT, padx=(0, 20))
++        
++        self.ignore_merges_var = tk.BooleanVar(value=False)
++        ignore_merges_check = ttk.Checkbutton(checkboxes_frame, text="Игнорировать merge-коммиты", variable=self.ignore_merges_var)
++        ignore_merges_check.pack(side=tk.LEFT)
++        
++    def initialize_state(self):
++        # Устанавливаем начальные значения для весов
++        self.weight_vars = {
++            'substantial_commits': tk.DoubleVar(value=0.3),
++            'lines': tk.DoubleVar(value=0.15),
++            'impact': tk.DoubleVar(value=0.25),
++            'substantive_ratio': tk.DoubleVar(value=0.2),
++            'revert_penalty': tk.DoubleVar(value=-0.1),
++            'daily_activity': tk.DoubleVar(value=0.2),
++            'merge_penalty': tk.DoubleVar(value=-0.05)
++        }
++        
++        # Список исключаемых разработчиков
++        self.excluded_developers = []
+ 
+     def setup_exclude_tab(self):
+         exclude_tab = ttk.Frame(self.notebook)
+@@ -157,20 +265,33 @@ class GitDevProductivityGUI:
+         info_frame = ttk.Frame(exclude_tab, padding=10)
+         info_frame.pack(fill=tk.X)
+         
+-        info_text = "Укажите, каких разработчиков нужно исключить из отчета и графиков."
+-        ttk.Label(info_frame, text=info_text, wraplength=600).pack(anchor=tk.W)
++        # Предупреждение о необходимости анализа репозитория
++        self.repo_warning = ttk.Label(info_frame, 
++                                     text="Для автоматической загрузки списка разработчиков сначала выполните анализ репозитория.",
++                                     foreground="orange", wraplength=600)
++        self.repo_warning.pack(anchor=tk.W, pady=10)
+         
+         # Фрейм для ввода email разработчика
+         input_frame = ttk.Frame(exclude_tab, padding=10)
+         input_frame.pack(fill=tk.X)
+         
+-        ttk.Label(input_frame, text="Email разработчика:").pack(side=tk.LEFT, padx=(0, 10))
++        self.add_dev_button = ttk.Button(input_frame, text="Добавить", command=self.add_excluded_developer, state="normal")
++        self.add_dev_button.pack(side=tk.LEFT)
++        
++        self.analyze_first_button = ttk.Button(input_frame, text="Анализировать репозиторий", 
++                                            command=self.analyze_repo_for_devs)
++        self.analyze_first_button.pack(side=tk.LEFT, padx=10)
++        
++    def analyze_repo_for_devs(self):
++        """Анализирует репозиторий для получения списка разработчиков"""
++        # Проверяем, указан ли путь к репозиторию
++        repo_path = self.repo_path_var.get()
++        if not repo_path or not os.path.exists(repo_path):
++            messagebox.showerror("Ошибка", "Укажите корректный путь к Git-репозиторию")
++            return
++
++        # ... остальной код анализа репозитория для загрузки разработчиков ...
+         
+-        add_button = ttk.Button(input_frame, text="Добавить", command=self.add_excluded_developer)
+-        add_button.pack(side=tk.LEFT)
++    def show_date_picker(self, date_var):
++        """Показывает виджет выбора даты"""
++        def set_date(date_str):
++            date_var.set(date_str)
++            
++        DatePicker(self.root, set_date, date_var.get())
+ 
+     def add_excluded_developer(self):
+         """Добавляет разработчика в список исключений"""
+@@ -207,7 +328,7 @@ class GitDevProductivityGUI:
+         if not os.path.exists(repo_path):
+             messagebox.showerror("Ошибка", "Укажите корректный путь к Git-репозиторию")
+             return
+-            
++
+         # Проверяем, является ли указанный путь Git-репозиторием
+         if not os.path.exists(os.path.join(repo_path, '.git')):
+             messagebox.showerror("Ошибка", "Указанная директория не является Git-репозиторием")
+@@ -256,6 +377,7 @@ class GitDevProductivityGUI:
+             
+             # Настраиваем конфигурацию
+             config.IGNORE_REVERTS = self.ignore_reverts_var.get()
++            config.IGNORE_MERGES = self.ignore_merges_var.get()
+             config.REPO_PATH = repo_path
+             config.OUTPUT_FILE = output_file
+             config.START_DATE = self.start_date_var.get() if self.start_date_var.get() else None
+@@ -382,7 +504,8 @@ class GitDevProductivityGUI:
+-            'daily_activity': 0.2
++            'daily_activity': 0.2,
++            'merge_penalty': -0.05
+         }
+         
+         for weight_id, default in default_values.items():
+diff --git a/gui.py b/gui.py
+index 9a2df33..a9fc2bd 100644
+--- a/gui.py
++++ b/gui.py
+@@ -4,6 +4,102 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
+ import threading
+ import subprocess
+ import datetime
++import calendar
++import os
++
++class DatePicker:
++    """Простой виджет выбора даты"""
++    def __init__(self, parent, callback, initial_date=None):
++        self.parent = parent
++        self.callback = callback
++        self.window = tk.Toplevel(parent)
++        self.window.title("Выберите дату")
++        self.window.transient(parent)
++        self.window.grab_set()
++        
++        # Установка текущей даты или начальной даты
++        if initial_date:
++            try:
++                self.current_date = datetime.datetime.strptime(initial_date, "%Y-%m-%d").date()
++            except ValueError:
++                self.current_date = datetime.date.today()
++        else:
++            self.current_date = datetime.date.today()
++        
++        self.year = self.current_date.year
++        self.month = self.current_date.month
++        
++        # Создаем виджеты
++        self.setup_ui()
++        
++        # Центрируем окно
++        self.window.update_idletasks()
++        width = self.window.winfo_width()
++        height = self.window.winfo_height()
++        x = (self.window.winfo_screenwidth() // 2) - (width // 2)
++        y = (self.window.winfo_screenheight() // 2) - (height // 2)
++        self.window.geometry('{}x{}+{}+{}'.format(width, height, x, y))
++        
++    def setup_ui(self):
++        """Настраивает пользовательский интерфейс"""
++        # Верхняя панель с навигацией
++        nav_frame = ttk.Frame(self.window)
++        nav_frame.pack(fill=tk.X, padx=5, pady=5)
++        
++        prev_year = ttk.Button(nav_frame, text="<<", width=3, command=self.prev_year)
++        prev_year.pack(side=tk.LEFT)
++        
++        prev_month = ttk.Button(nav_frame, text="<", width=3, command=self.prev_month)
++        prev_month.pack(side=tk.LEFT, padx=5)
++        
++        self.month_year_label = ttk.Label(nav_frame, text=self.get_month_year_str())
++        self.month_year_label.pack(side=tk.LEFT, padx=5)
++        
++        next_month = ttk.Button(nav_frame, text=">", width=3, command=self.next_month)
++        next_month.pack(side=tk.LEFT, padx=5)
++        
++        next_year = ttk.Button(nav_frame, text=">>", width=3, command=self.next_year)
++        next_year.pack(side=tk.LEFT)
++        
++        # Календарь
++        calendar_frame = ttk.Frame(self.window)
++        calendar_frame.pack(padx=5, pady=5)
++        
++        # Дни недели
++        days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
++        for i, day in enumerate(days):
++            ttk.Label(calendar_frame, text=day, width=4).grid(row=0, column=i)
++        
++        # Заполняем календарь днями
++        self.day_buttons = []
++        for i in range(6):  # 6 строк
++            for j in range(7):  # 7 дней в неделе
++                btn = ttk.Button(calendar_frame, text="", width=4, command=lambda x=i, y=j: self.select_day(x, y))
++                btn.grid(row=i+1, column=j)
++                self.day_buttons.append(btn)
++        
++        self.update_calendar()
++        
++        # Кнопки внизу
++        button_frame = ttk.Frame(self.window)
++        button_frame.pack(fill=tk.X, padx=5, pady=5)
++        
++        today_button = ttk.Button(button_frame, text="Сегодня", command=self.set_today)
++        today_button.pack(side=tk.LEFT, padx=5)
++        
++        clear_button = ttk.Button(button_frame, text="Очистить", command=self.clear_date)
++        clear_button.pack(side=tk.LEFT, padx=5)
++        
++        cancel_button = ttk.Button(button_frame, text="Отмена", command=self.window.destroy)
++        cancel_button.pack(side=tk.RIGHT, padx=5)
++
++    def get_month_year_str(self):
++        """Возвращает строку месяц и год"""
++        months = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", 
++                  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
++        return f"{months[self.month-1]} {self.year}"
++    
++    def update_calendar(self):
++        """Обновляет отображение календаря"""
++        # ... остальной код DatePicker ...
+ 
+ class RedirectText:
+     """Класс для перенаправления stdout в текстовый виджет"""
+@@ -25,22 +118,22 @@ class GitDevProductivityGUI:
+         self.root = root
+         self.root.title("Git Developer Productivity Analyzer")
+         self.root.geometry("900x750")
+-        
++
+         # Устанавливаем минимальный размер окна
+         self.root.minsize(800, 600)
+-        
++
+         # Создаем основной фрейм с отступами
+         main_frame = ttk.Frame(root, padding="10")
+         main_frame.pack(fill=tk.BOTH, expand=True)
+-        
++
+         # Создаем notebook (вкладки)
+         self.notebook = ttk.Notebook(main_frame)
+         self.notebook.pack(fill=tk.BOTH, expand=True, pady=5)
+-        
+-        # Создаем вкладки
++
++        # Инициализируем состояние приложения
++        self.initialize_state()
++
++        # Создаем вкладки
+         self.setup_analysis_tab()
+         self.setup_weights_tab()
+         self.setup_exclude_tab()
+@@ -128,26 +221,41 @@ class GitDevProductivityGUI:
+         ttk.Label(dates_frame, text="Период анализа:").pack(side=tk.LEFT, padx=(0, 10))
+         
+         ttk.Label(dates_frame, text="С:").pack(side=tk.LEFT, padx=(0, 5))
+         self.start_date_var = tk.StringVar()
+-        start_date_entry = ttk.Entry(dates_frame, textvariable=self.start_date_var, width=10)
+-        start_date_entry.pack(side=tk.LEFT, padx=(0, 10))
++        self.start_date_entry = ttk.Entry(dates_frame, textvariable=self.start_date_var, width=10)
++        self.start_date_entry.pack(side=tk.LEFT, padx=(0, 5))
++        
++        start_date_picker = ttk.Button(dates_frame, text="📅", width=3, 
++                                     command=lambda: self.show_date_picker(self.start_date_var))
++        start_date_picker.pack(side=tk.LEFT, padx=(0, 10))
+         
+         ttk.Label(dates_frame, text="По:").pack(side=tk.LEFT, padx=(0, 5))
+         self.end_date_var = tk.StringVar()
+-        end_date_entry = ttk.Entry(dates_frame, textvariable=self.end_date_var, width=10)
+-        end_date_entry.pack(side=tk.LEFT)
++        self.end_date_entry = ttk.Entry(dates_frame, textvariable=self.end_date_var, width=10)
++        self.end_date_entry.pack(side=tk.LEFT, padx=(0, 5))
++        
++        end_date_picker = ttk.Button(dates_frame, text="📅", width=3, 
++                                   command=lambda: self.show_date_picker(self.end_date_var))
++        end_date_picker.pack(side=tk.LEFT, padx=(0, 5))
+         
+         ttk.Label(dates_frame, text="(формат: YYYY-MM-DD)").pack(side=tk.LEFT, padx=5)
+ 
+         # Чекбоксы для опций
+         checkboxes_frame = ttk.Frame(options_frame)
+         checkboxes_frame.pack(fill=tk.X, pady=5)
+-        
++
+         self.ignore_reverts_var = tk.BooleanVar(value=True)
+         ignore_reverts_check = ttk.Checkbutton(checkboxes_frame, text="Игнорировать revert-коммиты", variable=self.ignore_reverts_var)
+         ignore_reverts_check.pack(side=tk.LEFT, padx=(0, 20))
++        
++        self.ignore_merges_var = tk.BooleanVar(value=False)
++        ignore_merges_check = ttk.Checkbutton(checkboxes_frame, text="Игнорировать merge-коммиты", variable=self.ignore_merges_var)
++        ignore_merges_check.pack(side=tk.LEFT)
++        
++    def initialize_state(self):
++        # Устанавливаем начальные значения для весов
++        self.weight_vars = {
++            'substantial_commits': tk.DoubleVar(value=0.3),
++            'lines': tk.DoubleVar(value=0.15),
++            'impact': tk.DoubleVar(value=0.25),
++            'substantive_ratio': tk.DoubleVar(value=0.2),
++            'revert_penalty': tk.DoubleVar(value=-0.1),
++            'daily_activity': tk.DoubleVar(value=0.2),
++            'merge_penalty': tk.DoubleVar(value=-0.05)
++        }
++        
++        # Список исключаемых разработчиков
++        self.excluded_developers = []
+ 
+     def setup_exclude_tab(self):
+         exclude_tab = ttk.Frame(self.notebook)
+@@ -157,20 +265,33 @@ class GitDevProductivityGUI:
+         info_frame = ttk.Frame(exclude_tab, padding=10)
+         info_frame.pack(fill=tk.X)
+         
+-        info_text = "Укажите, каких разработчиков нужно исключить из отчета и графиков."
+-        ttk.Label(info_frame, text=info_text, wraplength=600).pack(anchor=tk.W)
++        # Предупреждение о необходимости анализа репозитория
++        self.repo_warning = ttk.Label(info_frame, 
++                                     text="Для автоматической загрузки списка разработчиков сначала выполните анализ репозитория.",
++                                     foreground="orange", wraplength=600)
++        self.repo_warning.pack(anchor=tk.W, pady=10)
+         
+         # Фрейм для ввода email разработчика
+         input_frame = ttk.Frame(exclude_tab, padding=10)
+         input_frame.pack(fill=tk.X)
+         
+-        ttk.Label(input_frame, text="Email разработчика:").pack(side=tk.LEFT, padx=(0, 10))
++        self.add_dev_button = ttk.Button(input_frame, text="Добавить", command=self.add_excluded_developer, state="normal")
++        self.add_dev_button.pack(side=tk.LEFT)
++        
++        self.analyze_first_button = ttk.Button(input_frame, text="Анализировать репозиторий", 
++                                            command=self.analyze_repo_for_devs)
++        self.analyze_first_button.pack(side=tk.LEFT, padx=10)
++        
++    def analyze_repo_for_devs(self):
++        """Анализирует репозиторий для получения списка разработчиков"""
++        # Проверяем, указан ли путь к репозиторию
++        repo_path = self.repo_path_var.get()
++        if not repo_path or not os.path.exists(repo_path):
++            messagebox.showerror("Ошибка", "Укажите корректный путь к Git-репозиторию")
++            return
++
++        # ... остальной код анализа репозитория для загрузки разработчиков ...
+         
+-        add_button = ttk.Button(input_frame, text="Добавить", command=self.add_excluded_developer)
+-        add_button.pack(side=tk.LEFT)
++    def show_date_picker(self, date_var):
++        """Показывает виджет выбора даты"""
++        def set_date(date_str):
++            date_var.set(date_str)
++            
++        DatePicker(self.root, set_date, date_var.get())
+ 
+     def add_excluded_developer(self):
+         """Добавляет разработчика в список исключений"""
+@@ -207,7 +328,7 @@ class GitDevProductivityGUI:
+         if not os.path.exists(repo_path):
+             messagebox.showerror("Ошибка", "Укажите корректный путь к Git-репозиторию")
+             return
+-            
++
+         # Проверяем, является ли указанный путь Git-репозиторием
+         if not os.path.exists(os.path.join(repo_path, '.git')):
+             messagebox.showerror("Ошибка", "Указанная директория не является Git-репозиторием")
+@@ -256,6 +377,7 @@ class GitDevProductivityGUI:
+             
+             # Настраиваем конфигурацию
+             config.IGNORE_REVERTS = self.ignore_reverts_var.get()
++            config.IGNORE_MERGES = self.ignore_merges_var.get()
+             config.REPO_PATH = repo_path
+             config.OUTPUT_FILE = output_file
+             config.START_DATE = self.start_date_var.get() if self.start_date_var.get() else None
+@@ -382,7 +504,8 @@ class GitDevProductivityGUI:
+-            'daily_activity': 0.2
++            'daily_activity': 0.2,
++            'merge_penalty': -0.05
+         }
+         
+         for weight_id, default in default_values.items():
