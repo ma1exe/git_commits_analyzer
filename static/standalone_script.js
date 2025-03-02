@@ -634,7 +634,9 @@ document.addEventListener('DOMContentLoaded', function() {
                         </tr>
                     </table>
                 </div>
-            `;
+            
+
+                ${metrics && metrics.advanced_metrics ? createAdvancedMetricsSection(stats) : ""}`;
         }
         
         developerStatsDiv.innerHTML = html;
@@ -929,3 +931,238 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+// Функция для создания секции с расширенными метриками
+function createAdvancedMetricsSection(developer) {
+    if (!developer.advanced_metrics) {
+        return '';
+    }
+    
+    const metrics = developer.advanced_metrics;
+    
+    // Создаем контейнер для дополнительных метрик
+    const section = `
+    <div class="advanced-metrics-section">
+        <h3>Расширенная аналитика</h3>
+        
+        <div class="metrics-grid">
+            <!-- Распределение по типам файлов -->
+            <div class="metric-card" id="file-types-${developer.email.replace('@', '-').replace('.', '-')}">
+                <h4>Типы файлов</h4>
+                <canvas class="chart-canvas"></canvas>
+            </div>
+            
+            <!-- Распределение по времени суток -->
+            <div class="metric-card" id="time-dist-${developer.email.replace('@', '-').replace('.', '-')}">
+                <h4>Активность по времени суток</h4>
+                <canvas class="chart-canvas"></canvas>
+            </div>
+            
+            <!-- Размеры коммитов -->
+            <div class="metric-card" id="commit-sizes-${developer.email.replace('@', '-').replace('.', '-')}">
+                <h4>Размеры коммитов</h4>
+                <canvas class="chart-canvas"></canvas>
+            </div>
+            
+            <!-- Дополнительные метрики -->
+            <div class="metric-card">
+                <h4>Ключевые показатели</h4>
+                <div class="key-metrics">
+                    ${metrics.avg_commit_interval_hours ? 
+                      `<div class="key-metric">
+                         <span class="metric-label">Среднее время между коммитами:</span>
+                         <span class="metric-value">${metrics.avg_commit_interval_hours} ч.</span>
+                       </div>` : ''}
+                    
+                    ${metrics.commit_variability ? 
+                      `<div class="key-metric">
+                         <span class="metric-label">Коэффициент равномерности вкладов:</span>
+                         <span class="metric-value">${metrics.commit_variability}</span>
+                         <div class="metric-info">
+                            ${metrics.commit_variability < 0.5 ? 
+                              'Очень равномерная активность' : 
+                              metrics.commit_variability < 1.0 ? 
+                              'Умеренно равномерная активность' : 
+                              'Неравномерная активность'}
+                         </div>
+                       </div>` : ''}
+                </div>
+            </div>
+        </div>
+    </div>
+    `;
+    
+    // Добавляем скрипт для инициализации графиков после создания DOM
+    setTimeout(() => {
+        // График типов файлов
+        if (metrics.file_type_distribution) {
+            const fileTypesEl = document.getElementById(`file-types-${developer.email.replace('@', '-').replace('.', '-')}`);
+            if (fileTypesEl) {
+                const canvas = fileTypesEl.querySelector('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                const data = Object.entries(metrics.file_type_distribution)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 7); // Показываем топ-7 типов файлов
+                
+                new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: data.map(([ext]) => ext),
+                        datasets: [{
+                            data: data.map(([_, count]) => count),
+                            backgroundColor: [
+                                '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', 
+                                '#e74a3b', '#858796', '#5a5c69'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 12
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // График активности по времени суток
+        if (metrics.time_distribution) {
+            const timeDistEl = document.getElementById(`time-dist-${developer.email.replace('@', '-').replace('.', '-')}`);
+            if (timeDistEl) {
+                const canvas = timeDistEl.querySelector('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                const periods = {
+                    'morning': 'Утро (6-12)',
+                    'afternoon': 'День (12-18)',
+                    'evening': 'Вечер (18-23)',
+                    'night': 'Ночь (23-6)'
+                };
+                
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.values(periods),
+                        datasets: [{
+                            label: '% коммитов',
+                            data: Object.keys(periods).map(key => metrics.time_distribution[key] || 0),
+                            backgroundColor: [
+                                '#f8c291', '#1cc88a', '#4e73df', '#5a5c69'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        legend: {
+                            display: false
+                        },
+                        scales: {
+                            yAxes: [{
+                                ticks: {
+                                    beginAtZero: true,
+                                    callback: function(value) {
+                                        return value + '%';
+                                    }
+                                }
+                            }]
+                        }
+                    }
+                });
+            }
+        }
+        
+        // График размеров коммитов
+        if (metrics.commit_size_distribution) {
+            const commitSizesEl = document.getElementById(`commit-sizes-${developer.email.replace('@', '-').replace('.', '-')}`);
+            if (commitSizesEl) {
+                const canvas = commitSizesEl.querySelector('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                const sizes = {
+                    'small': 'Маленькие (<10)',
+                    'medium': 'Средние (10-50)',
+                    'large': 'Большие (>50)'
+                };
+                
+                new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.values(sizes),
+                        datasets: [{
+                            data: Object.keys(sizes).map(key => metrics.commit_size_distribution[key] || 0),
+                            backgroundColor: [
+                                '#1cc88a', '#4e73df', '#e74a3b'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 12
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }, 100);
+    
+    return section;
+}
+
+// Функция для интеграции расширенных метрик в карточку разработчика
+function enhanceDeveloperCard(developerCard, developerData) {
+    if (!developerData.advanced_metrics) {
+        return developerCard;
+    }
+    
+    // Добавляем секцию с расширенными метриками
+    const advancedSection = createAdvancedMetricsSection(developerData);
+    
+    // Находим конец карточки (перед закрывающим div)
+    const insertIndex = developerCard.lastIndexOf('</div>');
+    
+    // Вставляем секцию с расширенными метриками
+    return developerCard.substring(0, insertIndex) + advancedSection + developerCard.substring(insertIndex);
+}
+
+// Модификации для файла standalone_script.js
+function modifyStandaloneScript(scriptContent) {
+    // Добавляем стили для расширенных метрик
+    const styleInsertPoint = scriptContent.indexOf('// Скрипт для автономного HTML-отчета');
+    const modifiedScript = scriptContent.substring(0, styleInsertPoint) + 
+                           `// Стили для расширенных метрик\n${advancedMetricsStyles}\n\n` + 
+                           scriptContent.substring(styleInsertPoint);
+    
+    // Интегрируем отображение расширенных метрик
+    const developerCardStart = modifiedScript.indexOf('function displayDeveloperStats(');
+    const developerCardEnd = modifiedScript.indexOf('developerStatsDiv.innerHTML = html;', developerCardStart);
+    
+    // Находим шаблон карточки разработчика
+    const cardTemplateStart = modifiedScript.indexOf('html += `', developerCardStart);
+    const cardTemplateEnd = modifiedScript.indexOf('`;', cardTemplateStart);
+    
+    // Получаем текущий шаблон
+    const cardTemplate = modifiedScript.substring(cardTemplateStart + 8, cardTemplateEnd);
+    
+    // Модифицируем шаблон для включения расширенных метрик
+    const modifiedCardTemplate = cardTemplate + '\n${createAdvancedMetricsSection(stats)}';
+    
+    // Заменяем шаблон в скрипте
+    const finalScript = modifiedScript.substring(0, cardTemplateStart + 8) + 
+                        modifiedCardTemplate + 
+                        modifiedScript.substring(cardTemplateEnd);
+    
+    // Добавляем функцию создания расширенных метрик
+    return finalScript + '\n\n' + createAdvancedMetricsSection.toString();
+}

@@ -32,6 +32,7 @@ class DevActivityAnalyzer:
             'file_categories': defaultdict(int),
             'commit_impact': 0,
             'commit_distribution': defaultdict(int),  # Распределение по месяцам/годам
+            'time_of_day_distribution': defaultdict(int),  # Распределение по времени суток
             'code_churn': 0,  # Добавленные + удаленные строки
             'net_contribution': 0,  # Добавленные - удаленные строки
             'commit_subjects': [],
@@ -40,6 +41,7 @@ class DevActivityAnalyzer:
             'merge_count': 0,  # Количество merge-коммитов
             'most_modified_files': defaultdict(int),
             'squash_count': 0,  # Примерное количество squash-коммитов
+            'commits': []  # Сохраняем ID коммитов для дополнительного анализа
         })
         
         # Анализируем каждый коммит
@@ -90,6 +92,7 @@ class DevActivityAnalyzer:
             
             # Преобразуем defaultdict в обычный dict для JSON-сериализации
             stats['commit_distribution'] = dict(stats['commit_distribution'])
+            stats['time_of_day_distribution'] = dict(stats['time_of_day_distribution'])
             stats['file_categories'] = dict(stats['file_categories'])
             
             # Обнаруживаем потенциальные squash-коммиты
@@ -102,6 +105,10 @@ class DevActivityAnalyzer:
             if len(stats['commit_subjects']) > 20:
                 stats['commit_subjects'] = stats['commit_subjects'][:20]
             
+            # Рассчитываем расширенные метрики, если эта опция включена
+            if hasattr(config, 'ADVANCED_CHANGE_ANALYSIS') and config.ADVANCED_CHANGE_ANALYSIS:
+                stats['advanced_metrics'] = self.get_advanced_metrics(stats)
+
         return dict(developer_stats)
     
     def _analyze_commit(self, commit, developer_stats):
@@ -117,6 +124,9 @@ class DevActivityAnalyzer:
         
         # Обновляем счетчик коммитов
         dev_stats['total_commits'] += 1
+
+        # Сохраняем ID коммита для дополнительного анализа
+        dev_stats['commits'].append(commit['hash'])
         
         # Если это revert-коммит, увеличиваем счетчик
         if commit['is_revert']:
@@ -140,6 +150,18 @@ class DevActivityAnalyzer:
         commit_date_obj = datetime.strptime(commit_date, '%Y-%m-%d %H:%M:%S')
         month_year = commit_date_obj.strftime('%Y-%m')
         dev_stats['commit_distribution'][month_year] += 1
+        
+        # Обновляем распределение по времени суток
+        hour = commit_date_obj.hour
+        if 6 <= hour < 12:
+            time_period = 'morning'    # Утро (6-12)
+        elif 12 <= hour < 18:
+            time_period = 'afternoon'  # День (12-18)
+        elif 18 <= hour < 23:
+            time_period = 'evening'    # Вечер (18-23)
+        else:
+            time_period = 'night'      # Ночь (23-6)
+        dev_stats['time_of_day_distribution'][time_period] = dev_stats['time_of_day_distribution'].get(time_period, 0) + 1
         
         # Получаем детали коммита и изменения файлов
         commit_hash = commit['hash']
@@ -193,6 +215,117 @@ class DevActivityAnalyzer:
         # Простая формула: (изменено файлов) * (добавлено + удалено строк)
         impact = stats.get('files_changed', 0) * (stats.get('insertions', 0) + stats.get('deletions', 0))
         dev_stats['commit_impact'] += impact
+
+    def get_advanced_metrics(self, dev_stats):
+        """
+        Рассчитывает расширенные метрики для разработчика.
+        
+        Args:
+            dev_stats: Статистика по разработчику
+            
+        Returns:
+            dict: Словарь с расширенными метриками
+        """
+        if not dev_stats:
+            return {}
+        
+        metrics = {}
+        
+        # Распределение по типам файлов
+        file_types = {}
+        for file_path in dev_stats['files_modified']:
+            ext = os.path.splitext(file_path)[1].lower()
+            if not ext:
+                ext = '.other'
+            
+            file_types[ext] = file_types.get(ext, 0) + 1
+        
+        metrics['file_type_distribution'] = file_types
+        
+        # Процент коммитов в разные части дня
+        time_distribution = dev_stats.get('time_of_day_distribution', {})
+        total_commits = dev_stats['total_commits']
+        
+        if total_commits > 0:
+            metrics['time_distribution'] = {
+                period: round(count / total_commits * 100, 2)
+                for period, count in time_distribution.items()
+            }
+        else:
+            metrics['time_distribution'] = time_distribution
+        
+        # Среднее время между коммитами (в рабочие часы)
+        if len(dev_stats.get('commits', [])) > 1:
+            commit_dates = []
+            for commit_hash in dev_stats['commits']:
+                commit = next((c for c in self.commits if c['hash'] == commit_hash), None)
+                if commit:
+                    commit_dates.append(datetime.strptime(commit['date'], '%Y-%m-%d %H:%M:%S'))
+            
+            if commit_dates:
+                commit_dates.sort()
+                intervals = []
+                for i in range(1, len(commit_dates)):
+                    delta = commit_dates[i] - commit_dates[i-1]
+                    hours = delta.total_seconds() / 3600
+                    
+                    # Игнорируем интервалы больше 16 часов (считаем перерывами в работе)
+                    if hours < 16:
+                        intervals.append(hours)
+                
+                if intervals:
+                    metrics['avg_commit_interval_hours'] = round(sum(intervals) / len(intervals), 2)
+        
+        # Коэффициент изменчивости (насколько равномерны вклады)
+        if dev_stats.get('active_days', 0) > 0:
+            # Считаем коммиты за каждый день
+            daily_commits = {}
+            for commit_hash in dev_stats['commits']:
+                commit = next((c for c in self.commits if c['hash'] == commit_hash), None)
+                if commit:
+                    date = commit['date'].split(' ')[0]  # YYYY-MM-DD
+                    daily_commits[date] = daily_commits.get(date, 0) + 1
+            
+            # Считаем среднее и стандартное отклонение
+            commit_counts = list(daily_commits.values())
+            if commit_counts:
+                avg_commits = sum(commit_counts) / len(commit_counts)
+                
+                if avg_commits > 0:
+                    squared_diff = sum((count - avg_commits) ** 2 for count in commit_counts)
+                    std_dev = (squared_diff / len(commit_counts)) ** 0.5
+                    
+                    # Коэффициент вариации (CV) = std_dev / avg
+                    metrics['commit_variability'] = round(std_dev / avg_commits, 2)
+        
+        # Размер коммитов (маленькие/средние/большие)
+        commit_sizes = {
+            'small': 0,    # < 10 строк
+            'medium': 0,   # 10-50 строк 
+            'large': 0,    # > 50 строк
+        }
+        
+        for commit_hash in dev_stats['commits']:
+            commit_detail = self.commit_details.get(commit_hash, {})
+            stats = commit_detail.get('stats', {})
+            changes = stats.get('insertions', 0) + stats.get('deletions', 0)
+            
+            if changes < 10:
+                commit_sizes['small'] += 1
+            elif changes < 50:
+                commit_sizes['medium'] += 1
+            else:
+                commit_sizes['large'] += 1
+        
+        if total_commits > 0:
+            metrics['commit_size_distribution'] = {
+                size: round(count / total_commits * 100, 2)
+                for size, count in commit_sizes.items()
+            }
+        else:
+            metrics['commit_size_distribution'] = commit_sizes
+        
+        return metrics
 
     def _calculate_file_complexity(self, file_path):
         """

@@ -5,12 +5,15 @@ from datetime import datetime
 import config
 import sys
 import threading
+from change_analyzer import ChangeAnalyzer
 
 class GitDataCollector:
     def __init__(self, repo_path):
         self.repo_path = repo_path
         self.total_commits = 0  # Общее количество коммитов для отслеживания прогресса
         self.processed_commits = 0  # Количество обработанных коммитов
+        # Инициализируем улучшенный анализатор изменений
+        self.change_analyzer = ChangeAnalyzer()
         
     def collect_data(self):
         """Сбор данных из Git-репозитория."""
@@ -203,12 +206,23 @@ class GitDataCollector:
                 # Получаем diff для этого файла в этом коммите
                 file_diff = self._get_file_diff(commit['hash'], file_path)
                 
+                # Используем улучшенный алгоритм для определения существенности изменений
+                if hasattr(config, 'ADVANCED_CHANGE_ANALYSIS') and config.ADVANCED_CHANGE_ANALYSIS:
+                    is_substantial = self.change_analyzer.is_substantial_change(
+                        file_diff, 
+                        file_path, 
+                        commit['subject']
+                    )
+                else:
+                    # Используем старый алгоритм если улучшенный анализ не включен
+                    is_substantial = self._is_substantial_change(file_diff, file_path)
+                
                 changes.append({
                     'change_type': change_type,
                     'file_path': file_path,
                     'file_ext': os.path.splitext(file_path)[1].lower(),
                     'diff': file_diff,
-                    'is_substantial': self._is_substantial_change(file_diff, file_path)
+                    'is_substantial': is_substantial
                 })
                 
             file_changes[commit['hash']] = changes
@@ -259,6 +273,9 @@ class GitDataCollector:
         """
         Определяет, является ли изменение существенным.
         Игнорирует изменения только в отступах, если так настроено.
+        
+        Примечание: Сохранена для обратной совместимости, но рекомендуется
+        использовать метод change_analyzer.is_substantial_change.
         """
         if not diff:
             return False

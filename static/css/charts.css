@@ -1,0 +1,90 @@
+/* 
+ * Стили для графиков и диаграмм
+ */
+
+/* Контейнеры для графиков */
+.chart-section {
+    margin: 40px 0;
+    clear: both;
+}
+
+.chart-container {
+    margin: 25px 0 40px 0; /* Увеличенный нижний отступ */
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.05);
+    position: relative;
+    overflow: hidden; /* Предотвращаем выход содержимого за границы */
+    min-height: 350px; /* Минимальная высота для графиков */
+    clear: both; /* Предотвращаем обтекание */
+}
+
+.chart-container h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    color: #444;
+}
+
+/* Фиксированная высота для канвасов графиков */
+.chart-container canvas {
+    max-height: 400px; /* Ограничиваем высоту */
+    width: 100% !important; /* Адаптивная ширина */
+    height: auto !important; /* Авто-высота для соотношения сторон */
+}
+
+/* Рейтинг полезности */
+.usefulness-meter {
+    height: 20px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.usefulness-meter .fill {
+    height: 100%;
+    background: linear-gradient(90deg, #28a745, #17a2b8);
+    border-radius: 10px;
+    transition: width 0.5s ease;
+}
+
+/* Стили легенды для графиков */
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 10px;
+    gap: 10px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-right: 15px;
+    font-size: 0.85em;
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    margin-right: 5px;
+}
+
+/* Отзывчивая верстка для графиков */
+@media (max-width: 768px) {
+    .chart-container {
+        padding: 10px;
+        margin-bottom: 30px;
+    }
+    
+    .chart-container canvas {
+        max-height: 300px;
+    }
+    
+    .chart-legend {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

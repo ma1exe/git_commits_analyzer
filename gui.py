@@ -229,10 +229,10 @@ class GitDevProductivityGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Git Developer Productivity Analyzer")
-        self.root.geometry("1000x800")  # Увеличен размер окна
+        self.root.geometry("1000x900")  # Увеличен размер окна
         
         # Устанавливаем минимальный размер окна
-        self.root.minsize(900, 800)  # Увеличен минимальный размер окна
+        self.root.minsize(900, 900)  # Увеличен минимальный размер окна
         
         # Создаем основной фрейм с отступами
         main_frame = ttk.Frame(root, padding="10")
@@ -371,6 +371,14 @@ class GitDevProductivityGUI:
         self.ignore_merges_var = tk.BooleanVar(value=True)  # По умолчанию включено
         ignore_merges_check = ttk.Checkbutton(checkboxes_frame, text="Игнорировать merge-коммиты", variable=self.ignore_merges_var)
         ignore_merges_check.pack(side=tk.LEFT)
+
+        self.advanced_analysis_var = tk.BooleanVar(value=True)
+        advanced_analysis_check = ttk.Checkbutton(
+            checkboxes_frame, 
+            text="Использовать продвинутый анализ изменений", 
+            variable=self.advanced_analysis_var
+        )
+        advanced_analysis_check.pack(side=tk.LEFT) 
         
         # Настройки вывода HTML
         html_frame = ttk.LabelFrame(analysis_tab, text="Настройки HTML-отчета", padding=10)
@@ -1009,6 +1017,7 @@ class GitDevProductivityGUI:
             config.START_DATE = self.start_date_var.get() if self.start_date_var.get() else None
             config.END_DATE = self.end_date_var.get() if self.end_date_var.get() else None
             config.MIN_CODE_CHANGE_SIZE = self.min_changes_var.get()
+            config.ADVANCED_CHANGE_ANALYSIS = self.advanced_analysis_var.get()
             
             # Создаем директорию для выходного файла, если она не существует
             output_dir = os.path.dirname(os.path.abspath(output_file))

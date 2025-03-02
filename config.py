@@ -16,6 +16,10 @@ CONSIDER_FILE_COMPLEXITY = True
 OUTPUT_FILE = 'developer_stats.json'
 INCLUDE_DETAILED_STATS = True
 
+# Расширенные настройки анализа изменений
+ADVANCED_CHANGE_ANALYSIS = True  # Включает продвинутый анализ изменений
+DEBUG_MODE = False               # Режим отладки с выводом деталей расчета
+
 # Список расширений файлов по категориям
 CODE_FILE_EXTENSIONS = {
     '.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.c', '.cpp', '.h', '.hpp', 

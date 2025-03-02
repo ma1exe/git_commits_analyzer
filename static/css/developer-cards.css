@@ -1,0 +1,106 @@
+/* 
+ * Стили для карточек разработчиков
+ */
+
+/* Карточка разработчика */
+.developer-card {
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid #e1e4e8;
+    border-radius: 8px;
+    transition: box-shadow 0.3s ease;
+}
+
+.developer-card:hover {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.developer-card h3 {
+    margin-top: 0;
+    color: #24292e;
+}
+
+.developer-card h4 {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    color: #586069;
+    font-size: 1em;
+    border-bottom: 1px solid #eaecef;
+    padding-bottom: 5px;
+}
+
+/* Контроль видимости разработчиков */
+.developer-visibility-controls {
+    margin: 20px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e1e4e8;
+}
+
+.developer-visibility-controls h3 {
+    margin-top: 0;
+    margin-bottom: 15px;
+}
+
+.checkboxes-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.developer-label {
+    display: flex;
+    align-items: center;
+    padding: 5px 10px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.9em;
+    user-select: none;
+}
+
+.developer-label:hover {
+    background-color: #f0f0f0;
+}
+
+.developer-label input {
+    margin-right: 5px;
+}
+
+.button-container {
+    margin-top: 10px;
+}
+
+.control-button {
+    padding: 6px 12px;
+    margin-right: 10px;
+    background-color: #f8f9fa;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9em;
+}
+
+.control-button:hover {
+    background-color: #e9ecef;
+}
+
+/* Информация о весах */
+.weight-info {
+    margin: 20px 0;
+    padding: 15px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e1e4e8;
+}
+
+.weight-info h2 {
+    margin-top: 0;
+    border-bottom: none;
+}
+
+.weight-info p {
+    margin-bottom: 10px;
+}
